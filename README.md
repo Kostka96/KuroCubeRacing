@@ -11,7 +11,7 @@ H-коробка — 6 позиций на 4 концевиках, RP2040-Zero
 RP2040-Zero
 Adafruit TinyUSB
 HX711 library
----------------------------------------------------------------------------------------------------
+
 KuroCubeRacing 🎮
 DIY sim racing peripherals built around the RP2040-Zero microcontroller.
 Current hardware
