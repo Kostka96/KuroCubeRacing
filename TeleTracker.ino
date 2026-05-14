@@ -4,76 +4,80 @@
 #include <TFT_eSPI.h>
 
 TFT_eSPI tft = TFT_eSPI();
-
-// --- ВАЖНО: Создаем спрайт ГЛОБАЛЬНО, чтобы избежать фрагментации памяти ---
 TFT_eSprite canvas = TFT_eSprite(&tft);
-
 Adafruit_MPU6050 mpu;
 
-#define CORRECTION_ANGLE +88 
+#define CORRECTION_ANGLE 88 
+// Уменьшаем до 180. Это даст огромный прирост FPS.
+#define S_SIZE 180 
+#define S_CENTER (S_SIZE / 2)
+
 int rpm = 0;
+unsigned long lastTime = 0;
+float fps = 0;
 
 void setup() {
-  // Настраиваем Serial для диагностики
   Serial.begin(115200);
   
+  Wire.begin(21, 22);
+  Wire.setClock(400000);
+
   tft.init();
   tft.setRotation(0);
   tft.fillScreen(TFT_BLACK);
-
-  // Устанавливаем точку поворота в центр экрана
-  tft.setPivot(120, 120);
+  // Точка поворота на самом экране ВСЕГДА 120, 120 (центр дисплея)
+  tft.setPivot(120, 120); 
   
-  // --- СОЗДАЕМ СПРАЙТ ОДИН РАЗ В SETUP ---
-  // Используем 4-битную глубину цвета (16 цветов), чтобы занять в 2 раза меньше памяти!
-  canvas.setColorDepth(4);
-  
-  // Создаем сам объект спрайта в памяти
-  if (!canvas.createSprite(240, 240)) {
-    // Если память кончилась, печатаем ошибку и входим в бесконечный цикл
-    Serial.println("ОШИБКА: Не хватило памяти для спрайта!");
-    while(1) { delay(1000); }
+  canvas.setColorDepth(16); 
+  if (!canvas.createSprite(S_SIZE, S_SIZE)) {
+    while(1);
   }
-  
-  canvas.setPivot(120, 120);
+  // Точка поворота внутри спрайта - его собственный центр
+  canvas.setPivot(S_CENTER, S_CENTER);
 
-  if (!mpu.begin()) { 
-    Serial.println("No MPU"); 
-  }
-
-  mpu.setFilterBandwidth(MPU6050_BAND_44_HZ);
-  
-  Serial.println("Инициализация прошла успешно");
+  if (!mpu.begin()) { Serial.println("No MPU"); }
+  mpu.setFilterBandwidth(MPU6050_BAND_94_HZ);
 }
 
 void loop() {
-  // Проверяем гироскоп
+  // Считаем FPS
+  unsigned long currentTime = millis();
+  float currentFrameTime = (currentTime - lastTime);
+  lastTime = currentTime;
+  if (currentFrameTime > 0) fps = (fps * 0.9) + (1000.0 / currentFrameTime * 0.1);
+
+  // Читаем датчик
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
   
-  float rawAngle = atan2(a.acceleration.x, a.acceleration.y) * 180.0 / PI;
+  // Быстрая математика
+  float rawAngle = atan2(a.acceleration.x, a.acceleration.y) * 57.29578; 
   float displayAngle = rawAngle + CORRECTION_ANGLE;
   
-  // Рисуем всё во внутреннем спрайте
   canvas.fillSprite(TFT_BLACK);
   
-  // Геометрия
-  canvas.drawSmoothArc(120, 120, 118, 114, 220, 140, TFT_DARKGREY, TFT_BLACK);
+  // Рисуем дуги чуть меньшего радиуса, чтобы влезли в 180х180
+  // drawSmoothArc(x, y, R_out, R_in, start, end, color, back_color)
+  canvas.drawSmoothArc(S_CENTER, S_CENTER, 88, 84, 220, 140, TFT_DARKGREY, TFT_BLACK);
+  
   int rpmAngle = map(rpm, 0, 8000, 220, 500);
-  canvas.drawSmoothArc(120, 120, 118, 110, 220, rpmAngle, TFT_WHITE, TFT_BLACK);
-  canvas.drawFastHLine(40, 160, 160, TFT_WHITE);
+  canvas.drawSmoothArc(S_CENTER, S_CENTER, 88, 80, 220, rpmAngle, TFT_WHITE, TFT_BLACK);
   
-  // Текст 
-  canvas.setTextColor(TFT_WHITE, TFT_BLACK); // Указываем цвет фона для текста
-  canvas.drawString(String(rpm), 100, 130, 4);
+  // Линия
+  canvas.drawFastHLine(S_CENTER - 50, S_CENTER + 20, 100, TFT_WHITE);
   
-  // Самая быстрая отправка на дисплей
+  // Данные (используем drawNumber для скорости)
+  canvas.setTextColor(TFT_WHITE);
+  canvas.drawNumber(rpm, S_CENTER - 25, S_CENTER - 10, 4);
+  
+  // Вывод FPS
+  canvas.setTextColor(TFT_WHITE);
+  canvas.drawNumber((int)fps, S_CENTER - 10, 10, 2);
+  
+  // ПОВОРОТ И ОТПРАВКА
+  // Теперь процессор крутит на 25% меньше пикселей!
   canvas.pushRotated(displayAngle);
   
-  // Логика без delay
-  rpm += 100;
+  rpm += 150;
   if (rpm > 8000) rpm = 0;
-
-  // --- СБРОС СТОРОЖЕВОГО ТАЙМЕРА (очень важно!) ---
-  yield(); // Даем системе обработать фоновые задачи и сбрасываем таймер
 }
