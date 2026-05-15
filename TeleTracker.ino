@@ -32,7 +32,7 @@ void setup() {
   tft.setRotation(0);
   tft.fillScreen(TFT_BLACK);
   tft.setPivot(120, 120);
-  canvas.setColorDepth(16); // Раз 16 бит летает — оставляем их!
+  canvas.setColorDepth(16);
   canvas.createSprite(S_SIZE, S_SIZE);
   canvas.setPivot(S_CENTER, S_CENTER);
 
@@ -98,9 +98,12 @@ void coreTaskZero(void * pvParameters) {
     int twr = canvas.textWidth(rStr, 4);
     canvas.drawString(rStr, S_CENTER - twr / 2, S_CENTER - 14, 4);
 
-    canvas.drawSmoothArc(S_CENTER, S_CENTER, 88, 84, 210, 510, TFT_DARKGREY, TFT_BLACK);
-    int rpmAngle = map(r, 0, 8000, 210, 510);
-    canvas.drawSmoothArc(S_CENTER, S_CENTER, 88, 80, 210, rpmAngle, TFT_WHITE, TFT_BLACK);
+    // Фоновая дуга: от 5ч до 7ч через верх
+    canvas.drawSmoothArc(S_CENTER, S_CENTER, 82, 78, 30, 330, TFT_DARKGREY, TFT_BLACK);
+
+    // Активная дуга RPM
+    int rpmAngle = map(r, 0, 8000, 30, 330);
+    canvas.drawSmoothArc(S_CENTER, S_CENTER, 82, 74, 30, rpmAngle, TFT_WHITE, TFT_BLACK);
 
     
     // 2. Передача (Крупно в центре)
@@ -128,6 +131,10 @@ void coreTaskZero(void * pvParameters) {
     // Сцепление (Синий/Голубой)
     canvas.drawRect(S_CENTER + 20, p_y, 10, 30, TFT_DARKGREY);
     canvas.fillRect(S_CENTER + 20, p_y + (30 - map(sharedClutch, 0, 100, 0, 30)), 10, map(sharedClutch, 0, 100, 0, 30), TFT_SKYBLUE);
+
+    // Только передний план, фон не трогается — по сути прозрачность
+    canvas.drawBitmap(S_CENTER - 70, S_CENTER - 16, epd_bitmap_Dice6_32x32, 32, 32, TFT_WHITE);
+    canvas.pushImage(S_CENTER + 35, S_CENTER - 17, 40, 34, epd_bitmap_cat_40x34);
 
     canvas.pushRotated(sharedAngle);
     vTaskDelay(2 / portTICK_PERIOD_MS);
