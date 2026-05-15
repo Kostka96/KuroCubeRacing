@@ -15,6 +15,12 @@ Adafruit_MPU6050 mpu;
 
 // Общие переменные
 volatile int sharedRpm = 0;
+volatile int sharedSpeed = 0;
+volatile int sharedGear = 0;
+volatile int sharedGas = 0;   // 0-100
+volatile int sharedBrake = 0; // 0-100
+volatile int sharedClutch = 0; // 0-100
+
 float sharedAngle = 0; 
 float fps = 0;
 
@@ -81,37 +87,74 @@ void coreTaskZero(void * pvParameters) {
 
     canvas.fillSprite(TFT_BLACK);
     
-    // Рисуем дуги
-    canvas.drawSmoothArc(S_CENTER, S_CENTER, 88, 84, 220, 140, TFT_DARKGREY, TFT_BLACK);
     int r = sharedRpm;
-    int rpmAngle = map(r, 0, 8000, 220, 500);
-    canvas.drawSmoothArc(S_CENTER, S_CENTER, 88, 80, 220, rpmAngle, TFT_WHITE, TFT_BLACK);
-    
-    // Линия горизонта
-    canvas.drawFastHLine(S_CENTER - 50, S_CENTER + 20, 100, TFT_WHITE);
-    
-    // Текст
+    int s = sharedSpeed;
+    int g = sharedGear;
+
     canvas.setTextColor(TFT_WHITE);
-    canvas.drawNumber(r, S_CENTER - 25, S_CENTER - 10, 4);
-    canvas.drawNumber((int)fps, S_CENTER - 10, 10, 2);
+
+    // 1. Шкала RPM (верхняя дуга)
+    String rStr = String(r);
+    int twr = canvas.textWidth(rStr, 4);
+    canvas.drawString(rStr, S_CENTER - twr / 2, S_CENTER - 14, 4);
+
+    canvas.drawSmoothArc(S_CENTER, S_CENTER, 88, 84, 210, 510, TFT_DARKGREY, TFT_BLACK);
+    int rpmAngle = map(r, 0, 8000, 210, 510);
+    canvas.drawSmoothArc(S_CENTER, S_CENTER, 88, 80, 210, rpmAngle, TFT_WHITE, TFT_BLACK);
+
     
-    // Вывод на экран
+    // 2. Передача (Крупно в центре)
+    String gStr = (g == 0) ? "N" : String(g);
+    int tgw = canvas.textWidth(gStr, 4);
+    canvas.drawString(gStr, S_CENTER - tgw / 2, S_CENTER + 10, 4);
+
+    // 3. Скорость 
+    // Автоцентровка через textWidth
+    String sStr = String(s);
+    int tw = canvas.textWidth(sStr, 6);
+    canvas.drawString(sStr, S_CENTER - tw / 2, S_CENTER - 55, 6);
+    //canvas.drawString("km/h", S_CENTER - 20, S_CENTER - 14, 4);
+
+    // 4. Педали (3 вертикальных ползунка внизу)
+    // Газ (Зеленый)
+    int p_y = S_CENTER + 40; // Начало по Y
+    canvas.drawRect(S_CENTER - 30, p_y, 10, 30, TFT_DARKGREY);
+    canvas.fillRect(S_CENTER - 30, p_y + (30 - map(sharedGas, 0, 100, 0, 30)), 10, map(sharedGas, 0, 100, 0, 30), TFT_GREEN);
+    
+    // Тормоз (Красный)
+    canvas.drawRect(S_CENTER - 5, p_y, 10, 30, TFT_DARKGREY);
+    canvas.fillRect(S_CENTER - 5, p_y + (30 - map(sharedBrake, 0, 100, 0, 30)), 10, map(sharedBrake, 0, 100, 0, 30), TFT_RED);
+
+    // Сцепление (Синий/Голубой)
+    canvas.drawRect(S_CENTER + 20, p_y, 10, 30, TFT_DARKGREY);
+    canvas.fillRect(S_CENTER + 20, p_y + (30 - map(sharedClutch, 0, 100, 0, 30)), 10, map(sharedClutch, 0, 100, 0, 30), TFT_SKYBLUE);
+
     canvas.pushRotated(sharedAngle);
-    
-    // Важнейшая задержка для стабильности
-    vTaskDelay(2 / portTICK_PERIOD_MS); 
+    vTaskDelay(2 / portTICK_PERIOD_MS);
   }
 }
-
 // --- ЯДРО 1: ТОЛЬКО СЕТЬ ---
 void loop() {
   // 1. Обработка UDP
   int packetSize = udp.parsePacket();
   if (packetSize) {
     int len = udp.read(incomingPacket, 255);
-    if (len > 0) incomingPacket[len] = 0;
-    // Предполагаем, что пришло просто число "6500"
-    sharedRpm = atoi(incomingPacket); 
+    if (len > 0) {
+      incomingPacket[len] = 0;
+      // Парсим CSV: rpm,speed,gear,gas,brake,clutch
+      char* ptr = strtok(incomingPacket, ",");
+      if (ptr) sharedRpm = atoi(ptr);
+      ptr = strtok(NULL, ",");
+      if (ptr) sharedSpeed = atoi(ptr);
+      ptr = strtok(NULL, ",");
+      if (ptr) sharedGear = atoi(ptr);
+      ptr = strtok(NULL, ",");
+      if (ptr) sharedGas = atoi(ptr);
+      ptr = strtok(NULL, ",");
+      if (ptr) sharedBrake = atoi(ptr);
+      ptr = strtok(NULL, ",");
+      if (ptr) sharedClutch = atoi(ptr);
+    }
   }
   // Даем время фоновым процессам Wi-Fi
   yield();
