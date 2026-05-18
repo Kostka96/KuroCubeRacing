@@ -5,6 +5,7 @@
 #include <Wire.h>
 #include <TFT_eSPI.h>
 #include "config.h"
+#include "settings.h"
 
 WiFiUDP udp;
 char incomingPacket[255];
@@ -26,6 +27,11 @@ float fps = 0;
 
 void setup() {
   Serial.begin(115200);
+  settings_load();
+
+  const int btnPins[] = {BTN_0,BTN_1,BTN_2,BTN_3,BTN_4,BTN_5,BTN_6,BTN_7,BTN_8,BTN_9};
+  for (int i = 0; i < 10; i++)
+    pinMode(btnPins[i], INPUT_PULLUP);
 
   // 1. Сначала графика (резервируем память)
   tft.init();
@@ -45,15 +51,26 @@ void setup() {
   mpu.setFilterBandwidth(MPU6050_BAND_94_HZ);
 
   // 3. Wi-Fi
-  WiFi.begin(ssid, password);
+  Serial.printf("Подключаюсь к: %s\n", cfg_ssid);
+  WiFi.begin(cfg_ssid, cfg_password);
+
+  unsigned long wifiStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - wifiStart > 10000) {
+      Serial.println("\nWiFi timeout!");
+      Serial.printf("SSID: '%s'\n", cfg_ssid);
+      Serial.printf("Pass: '%s'\n", cfg_password);
+      Serial.println("Используй: set ssid / set password / reboot");
+      break;
+    }
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nWiFi connected");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-  udp.begin(localUdpPort);
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi connected: " + WiFi.localIP().toString());
+    udp.begin(cfg_udp_port);
+  }
 
   // 4. Запуск задачи на Ядре 0
   xTaskCreatePinnedToCore(
@@ -67,6 +84,66 @@ void setup() {
   );
 }
 
+void handleSerial() {
+  if (!Serial.available()) return;
+
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+  if (line.length() == 0) return;
+
+  // Парсим: команда значение
+  int sep = line.indexOf(' ');
+  String cmd = (sep == -1) ? line : line.substring(0, sep);
+  String val = (sep == -1) ? "" : line.substring(sep + 1);
+  cmd.toLowerCase();
+
+  if (cmd == "help") {
+    Serial.println("=== TeleTracking CLI ===");
+    Serial.println("set ssid <name>       — WiFi сеть");
+    Serial.println("set password <pass>   — WiFi пароль");
+    Serial.println("set ip <x.x.x.x>      — IP компьютера");
+    Serial.println("set udpport <port>     — порт приёма (default 4210)");
+    Serial.println("set hostport <port>    — порт отправки (default 4211)");
+    Serial.println("show                   — текущие настройки");
+    Serial.println("reset                  — сброс к дефолтам");
+    Serial.println("reboot                 — перезагрузка");
+
+  } else if (cmd == "show") {
+    Serial.println("=== Текущие настройки ===");
+    Serial.printf("ssid:     %s\n", cfg_ssid);
+    Serial.printf("password: %s\n", cfg_password);
+    Serial.printf("host_ip:  %s\n", cfg_host_ip);
+    Serial.printf("udpport:  %d\n", cfg_udp_port);
+    Serial.printf("hostport: %d\n", cfg_host_port);
+    Serial.printf("wifi:     %s\n", WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "не подключен");
+
+  } else if (cmd == "set") {
+    int sep2 = val.indexOf(' ');
+    if (sep2 == -1) { Serial.println("Ошибка: нет значения"); return; }
+    String key = val.substring(0, sep2);
+    String v   = val.substring(sep2 + 1);
+    key.toLowerCase();
+
+    if (key == "ssid")          { settings_save_ssid(v.c_str());     Serial.println("OK — перезагрузи для применения"); }
+    else if (key == "password") { settings_save_password(v.c_str()); Serial.println("OK — перезагрузи для применения"); }
+    else if (key == "ip")       { settings_save_host_ip(v.c_str());  Serial.println("OK"); }
+    else if (key == "udpport")  { settings_save_port("udp_port",  v.toInt(), &cfg_udp_port);  Serial.println("OK"); }
+    else if (key == "hostport") { settings_save_port("host_port", v.toInt(), &cfg_host_port); Serial.println("OK"); }
+    else Serial.println("Неизвестный параметр. Введи help.");
+
+  } else if (cmd == "reset") {
+    settings_reset();
+    Serial.println("Сброшено к дефолтам — перезагрузи");
+
+  } else if (cmd == "reboot") {
+    Serial.println("Перезагрузка...");
+    delay(500);
+    ESP.restart();
+
+  } else {
+    Serial.println("Неизвестная команда. Введи help.");
+  }
+}
 // --- ЗАДАЧА НА ЯДРЕ 0: ДАТЧИК + ГРАФИКА ---
 void coreTaskZero(void * pvParameters) {
   unsigned long lastTime = 0;
@@ -96,31 +173,29 @@ void coreTaskZero(void * pvParameters) {
     // 1. Шкала RPM (верхняя дуга)
     String rStr = String(r);
     int twr = canvas.textWidth(rStr, 4);
-    canvas.drawString(rStr, S_CENTER - twr / 2, S_CENTER - 14, 4);
+    canvas.drawString(rStr, S_CENTER - twr / 2, S_CENTER + 10, 4);
 
-    // Фоновая дуга: от 5ч до 7ч через верх
-    canvas.drawSmoothArc(S_CENTER, S_CENTER, 82, 78, 30, 330, TFT_DARKGREY, TFT_BLACK);
-
-    // Активная дуга RPM
+    // Отступ от края сохраняем ~8-10px
+    canvas.drawSmoothArc(S_CENTER, S_CENTER, 108, 104, 30, 330, TFT_DARKGREY, TFT_BLACK);
     int rpmAngle = map(r, 0, 8000, 30, 330);
-    canvas.drawSmoothArc(S_CENTER, S_CENTER, 82, 74, 30, rpmAngle, TFT_WHITE, TFT_BLACK);
+    canvas.drawSmoothArc(S_CENTER, S_CENTER, 108, 100, 30, rpmAngle, TFT_WHITE, TFT_BLACK);
 
     
     // 2. Передача (Крупно в центре)
     String gStr = (g == 0) ? "N" : String(g);
     int tgw = canvas.textWidth(gStr, 4);
-    canvas.drawString(gStr, S_CENTER - tgw / 2, S_CENTER + 10, 4);
+    canvas.drawString(gStr, S_CENTER - tgw / 2, S_CENTER + 32, 4);
 
     // 3. Скорость 
     // Автоцентровка через textWidth
     String sStr = String(s);
-    int tw = canvas.textWidth(sStr, 6);
-    canvas.drawString(sStr, S_CENTER - tw / 2, S_CENTER - 55, 6);
+    int tw = canvas.textWidth(sStr, 8);
+    canvas.drawString(sStr, S_CENTER - tw / 2, S_CENTER - 70, 8);
     //canvas.drawString("km/h", S_CENTER - 20, S_CENTER - 14, 4);
 
     // 4. Педали (3 вертикальных ползунка внизу)
     // Газ (Зеленый)
-    int p_y = S_CENTER + 40; // Начало по Y
+    int p_y = S_CENTER + 60; // Начало по Y
     canvas.drawRect(S_CENTER - 30, p_y, 10, 30, TFT_DARKGREY);
     canvas.fillRect(S_CENTER - 30, p_y + (30 - map(sharedGas, 0, 100, 0, 30)), 10, map(sharedGas, 0, 100, 0, 30), TFT_GREEN);
     
@@ -133,8 +208,8 @@ void coreTaskZero(void * pvParameters) {
     canvas.fillRect(S_CENTER + 20, p_y + (30 - map(sharedClutch, 0, 100, 0, 30)), 10, map(sharedClutch, 0, 100, 0, 30), TFT_SKYBLUE);
 
     // Только передний план, фон не трогается — по сути прозрачность
-    canvas.drawBitmap(S_CENTER - 70, S_CENTER - 16, epd_bitmap_Dice6_32x32, 32, 32, TFT_WHITE);
-    canvas.pushImage(S_CENTER + 35, S_CENTER - 17, 40, 34, epd_bitmap_cat_40x34);
+    canvas.drawBitmap(S_CENTER - 73, S_CENTER + 18, epd_bitmap_Dice6_32x32, 32, 32, TFT_WHITE);
+    canvas.pushImage(S_CENTER + 40, S_CENTER + 17, 40, 34, epd_bitmap_cat_40x34);
 
     canvas.pushRotated(sharedAngle);
     vTaskDelay(2 / portTICK_PERIOD_MS);
@@ -142,6 +217,11 @@ void coreTaskZero(void * pvParameters) {
 }
 // --- ЯДРО 1: ТОЛЬКО СЕТЬ ---
 void loop() {
+  handleSerial();
+  if (WiFi.status() != WL_CONNECTED) {
+    delay(5);
+    return; // пропускаем UDP если нет сети
+  }
   // 1. Обработка UDP
   int packetSize = udp.parsePacket();
   if (packetSize) {
@@ -163,6 +243,20 @@ void loop() {
       if (ptr) sharedClutch = atoi(ptr);
     }
   }
+  struct ButtonPacket {
+  uint16_t buttons; // 10 кнопок, запас до 16
+  };
+  const int btnPins[] = {BTN_0,BTN_1,BTN_2,BTN_3,BTN_4,BTN_5,BTN_6,BTN_7,BTN_8,BTN_9};
+
+  ButtonPacket pkt = {0};
+
+  for (int i = 0; i < 10; i++)
+    if (!digitalRead(btnPins[i]))
+      pkt.buttons |= (1 << i);
+
+  udp.beginPacket(DEFAULT_HOST_IP, DEFAULT_HOST_PORT);
+  udp.write((uint8_t*)&pkt, sizeof(pkt));
+  udp.endPacket();
   // Даем время фоновым процессам Wi-Fi
   yield();
   delay(5); 
