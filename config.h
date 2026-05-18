@@ -3,8 +3,8 @@
 #define CONFIG_H
 
 // Настройки Wi-Fi
-const char* ssid     = "Milavitsa-room707";
-const char* password = "Link2018@!";
+const char* ssid     = "-----";
+const char* password = "-----";
 const unsigned int localUdpPort = 4210;
 
 // Настройки геометрии и калибровки
