@@ -1,18 +1,28 @@
-// Файл config.h
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// Настройки Wi-Fi
-const char* ssid     = "-----";
-const char* password = "-----";
-const unsigned int localUdpPort = 4210;
+// Дефолтные значения если NVS пустой
+#define DEFAULT_SSID       "Milavitsa-room707"
+#define DEFAULT_PASSWORD   "Link2018@!"
+#define DEFAULT_HOST_IP    "192.168.16.149"
+#define DEFAULT_UDP_PORT   4210
+#define DEFAULT_HOST_PORT  4211
 
-// Настройки геометрии и калибровки
 #define CORRECTION_ANGLE 88
-#define S_SIZE 180
+#define S_SIZE   230
 #define S_CENTER (S_SIZE / 2)
 
-#endif
+// Кнопки
+#define BTN_0  12
+#define BTN_1  13
+#define BTN_2  14
+#define BTN_3  15
+#define BTN_4  16
+#define BTN_5  17
+#define BTN_6  25
+#define BTN_7  26
+#define BTN_8  27
+#define BTN_9  32
 
 //drawSmoothArc углы (TFT_eSPI):
 //  0°   = 6 часов
@@ -206,3 +216,5 @@ const uint16_t epd_bitmap_cat_40x34[1360] PROGMEM = {
 	0x0842, 0x0842, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
 	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
 };
+
+#endif
