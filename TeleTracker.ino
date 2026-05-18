@@ -21,6 +21,7 @@ volatile int sharedGear = 0;
 volatile int sharedGas = 0;   // 0-100
 volatile int sharedBrake = 0; // 0-100
 volatile int sharedClutch = 0; // 0-100
+volatile int sharedRpmMax = 8000;
 
 float sharedAngle = 0; 
 float fps = 0;
@@ -163,51 +164,88 @@ void coreTaskZero(void * pvParameters) {
     lastTime = currentTime;
 
     canvas.fillSprite(TFT_BLACK);
-    
-    int r = sharedRpm;
-    int s = sharedSpeed;
-    int g = sharedGear;
+
+    int r  = sharedRpm;
+    int rm = sharedRpmMax;
+    int s  = sharedSpeed;
+    int g  = sharedGear;
 
     canvas.setTextColor(TFT_WHITE);
 
-    // 1. Шкала RPM (верхняя дуга)
+    // 1. Шкала RPM — фоновая дуга
+    canvas.drawSmoothArc(S_CENTER, S_CENTER, 108, 104, 30, 330, TFT_DARKGREY, TFT_BLACK);
+
+    if (rm > 0) {
+        // Отметка shift point на дуге (85% от max) — голубая засечка
+        int shiftMarkAngle = map((int)(rm * 0.85f), 0, rm, 30, 330);
+        canvas.drawSmoothArc(S_CENTER, S_CENTER, 108, 100, shiftMarkAngle, shiftMarkAngle + 6, TFT_CYAN, TFT_BLACK);
+    }
+
+    if (rm > 0 && r > 0) {
+        float pct    = (float)r / rm;
+        int endAngle = constrain(map(r, 0, rm, 30, 330), 30, 330);
+
+        // Цвет дуги
+        uint16_t color;
+        if      (pct < 0.70f) color = TFT_WHITE;
+        else if (pct < 0.85f) color = TFT_YELLOW;
+        else if (pct < 0.95f) color = 0xFBE0;   // оранжевый
+        else                  color = TFT_RED;
+
+        // Мигание на redline
+        bool draw = true;
+        if (pct >= 0.95f) {
+            static bool blink = false;
+            static unsigned long lastBlink = 0;
+            if (millis() - lastBlink > 100) { blink = !blink; lastBlink = millis(); }
+            draw = blink;
+        }
+        if (draw)
+            canvas.drawSmoothArc(S_CENTER, S_CENTER, 108, 100, 30, endAngle, color, TFT_BLACK);
+
+        // Световая полоса shift — две дуги по краям когда пора переключать
+        if (pct >= 0.85f) {
+            static bool shiftBlink = false;
+            static unsigned long lastShiftBlink = 0;
+            // Мигание ускоряется по мере приближения к redline
+            int blinkInterval = (pct >= 0.95f) ? 60 : 150;
+            if (millis() - lastShiftBlink > blinkInterval) {
+                shiftBlink = !shiftBlink;
+                lastShiftBlink = millis();
+            }
+            if (shiftBlink) {
+                // Левая и правая засечки у концов дуги
+                canvas.drawSmoothArc(S_CENTER - 5, S_CENTER, 95, 85, 20,  45,  TFT_CYAN, TFT_BLACK);
+                canvas.drawSmoothArc(S_CENTER + 3, S_CENTER, 95, 85, 315, 340, TFT_CYAN, TFT_BLACK);
+            }
+        }
+    }
+
+    // 2. RPM цифры
     String rStr = String(r);
     int twr = canvas.textWidth(rStr, 4);
     canvas.drawString(rStr, S_CENTER - twr / 2, S_CENTER + 10, 4);
 
-    // Отступ от края сохраняем ~8-10px
-    canvas.drawSmoothArc(S_CENTER, S_CENTER, 108, 104, 30, 330, TFT_DARKGREY, TFT_BLACK);
-    int rpmAngle = map(r, 0, 8000, 30, 330);
-    canvas.drawSmoothArc(S_CENTER, S_CENTER, 108, 100, 30, rpmAngle, TFT_WHITE, TFT_BLACK);
-
-    
-    // 2. Передача (Крупно в центре)
-    String gStr = (g == 0) ? "N" : String(g);
+    // 3. Передача
+    String gStr = (g == 0) ? "N" : (g == -1) ? "R" : String(g);
     int tgw = canvas.textWidth(gStr, 4);
     canvas.drawString(gStr, S_CENTER - tgw / 2, S_CENTER + 32, 4);
 
-    // 3. Скорость 
-    // Автоцентровка через textWidth
+    // 4. Скорость
     String sStr = String(s);
     int tw = canvas.textWidth(sStr, 8);
     canvas.drawString(sStr, S_CENTER - tw / 2, S_CENTER - 70, 8);
-    //canvas.drawString("km/h", S_CENTER - 20, S_CENTER - 14, 4);
 
-    // 4. Педали (3 вертикальных ползунка внизу)
-    // Газ (Зеленый)
-    int p_y = S_CENTER + 60; // Начало по Y
+    // 5. Педали
+    int p_y = S_CENTER + 60;
     canvas.drawRect(S_CENTER - 30, p_y, 10, 30, TFT_DARKGREY);
-    canvas.fillRect(S_CENTER - 30, p_y + (30 - map(sharedGas, 0, 100, 0, 30)), 10, map(sharedGas, 0, 100, 0, 30), TFT_GREEN);
-    
-    // Тормоз (Красный)
-    canvas.drawRect(S_CENTER - 5, p_y, 10, 30, TFT_DARKGREY);
-    canvas.fillRect(S_CENTER - 5, p_y + (30 - map(sharedBrake, 0, 100, 0, 30)), 10, map(sharedBrake, 0, 100, 0, 30), TFT_RED);
-
-    // Сцепление (Синий/Голубой)
+    canvas.fillRect(S_CENTER - 30, p_y + (30 - map(sharedGas,    0, 100, 0, 30)), 10, map(sharedGas,    0, 100, 0, 30), TFT_GREEN);
+    canvas.drawRect(S_CENTER - 5,  p_y, 10, 30, TFT_DARKGREY);
+    canvas.fillRect(S_CENTER - 5,  p_y + (30 - map(sharedBrake,  0, 100, 0, 30)), 10, map(sharedBrake,  0, 100, 0, 30), TFT_RED);
     canvas.drawRect(S_CENTER + 20, p_y, 10, 30, TFT_DARKGREY);
     canvas.fillRect(S_CENTER + 20, p_y + (30 - map(sharedClutch, 0, 100, 0, 30)), 10, map(sharedClutch, 0, 100, 0, 30), TFT_SKYBLUE);
 
-    // Только передний план, фон не трогается — по сути прозрачность
+    // 6. Логотипы
     canvas.drawBitmap(S_CENTER - 73, S_CENTER + 18, epd_bitmap_Dice6_32x32, 32, 32, TFT_WHITE);
     canvas.pushImage(S_CENTER + 40, S_CENTER + 17, 40, 34, epd_bitmap_cat_40x34);
 
@@ -228,9 +266,11 @@ void loop() {
     int len = udp.read(incomingPacket, 255);
     if (len > 0) {
       incomingPacket[len] = 0;
-      // Парсим CSV: rpm,speed,gear,gas,brake,clutch
+      // Парсим CSV: rpm,RpmMax,speed,gear,gas,brake,clutch
       char* ptr = strtok(incomingPacket, ",");
       if (ptr) sharedRpm = atoi(ptr);
+      ptr = strtok(NULL, ",");
+      if (ptr) sharedRpmMax = atoi(ptr);  // ← новое поле
       ptr = strtok(NULL, ",");
       if (ptr) sharedSpeed = atoi(ptr);
       ptr = strtok(NULL, ",");
