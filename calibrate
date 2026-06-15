@@ -1,0 +1,42 @@
+#include <HX711.h>
+
+#define PIN_THROTTLE A0
+#define PIN_CLUTCH   A1
+#define PIN_DATA     9
+#define PIN_CLOCK    8
+
+HX711 brakeSensor;
+
+void setup() {
+  Serial.begin(115200); // Высокая скорость, чтобы данные не отставали
+  
+  // Инициализация тормоза, чтобы пины тактирования не мешали аналоговым
+  brakeSensor.begin(PIN_DATA, PIN_CLOCK);
+  brakeSensor.set_scale(1.0);
+  delay(500);
+  if (brakeSensor.is_ready()) {
+    brakeSensor.tare();
+  }
+}
+
+void loop() {
+  // Читаем сырые значения АЦП (0 - 1023)
+  int rawThrottle = analogRead(PIN_THROTTLE);
+  int rawClutch   = analogRead(PIN_CLUTCH);
+  
+  // Читаем сырое значение тензодатчика тормоза
+  long rawBrake = 0;
+  if (brakeSensor.is_ready()) {
+    // Используем get_value(1), чтобы видеть чистую дельту с учетом tare()
+    rawBrake = brakeSensor.get_value(1); 
+  }
+
+  // Выводим всё в красивом формате для Плоттера по интерфейсу Serial
+  Serial.print("GAS_Raw:");    Serial.print(rawThrottle);
+  Serial.print(" ");
+  Serial.print("CLUTCH_Raw:"); Serial.print(rawClutch);
+  Serial.print(" ");
+  Serial.print("BRAKE_Raw:");  Serial.println(-rawBrake); // Инвертируем в плюс для удобства графиков
+
+  delay(50); // Частота обновления 20 Гц — идеально для калибровки глазами
+}
